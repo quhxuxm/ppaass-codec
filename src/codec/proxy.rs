@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use log::{error, trace};
-use ppaass_crypto::{decrypt_with_aes, encrypt_with_aes, RsaCrypto};
+use ppaass_crypto::{decrypt_with_aes, encrypt_with_aes, RsaCryptoFetcher};
 use ppaass_protocol::message::{AgentMessage, Encryption, ProxyMessage};
 use pretty_hex::*;
 use tokio_util::codec::{Decoder, Encoder};
@@ -15,16 +15,22 @@ use crate::{
 
 use super::DecodeStatus;
 
-pub struct ProxyConnectionCodec {
-    rsa_crypto: RsaCrypto,
+pub struct ProxyConnectionCodec<F>
+where
+    F: RsaCryptoFetcher,
+{
+    rsa_crypto_fetcher: F,
     compress: bool,
     status: DecodeStatus,
 }
 
-impl ProxyConnectionCodec {
-    pub fn new(compress: bool, rsa_crypto: RsaCrypto) -> ProxyConnectionCodec {
+impl<F> ProxyConnectionCodec<F>
+where
+    F: RsaCryptoFetcher,
+{
+    pub fn new(compress: bool, rsa_crypto_fetcher: F) -> Self {
         Self {
-            rsa_crypto,
+            rsa_crypto_fetcher,
             compress,
             status: DecodeStatus::Head,
         }
@@ -32,7 +38,10 @@ impl ProxyConnectionCodec {
 }
 
 /// Decode the input bytes buffer to ppaass message
-impl Decoder for ProxyConnectionCodec {
+impl<F> Decoder for ProxyConnectionCodec<F>
+where
+    F: RsaCryptoFetcher,
+{
     type Item = ProxyMessage;
     type Error = DecoderError;
 
@@ -114,10 +123,10 @@ impl Decoder for ProxyConnectionCodec {
         let original_proxy_message_payload = match encryption {
             Encryption::Plain => encrypted_proxy_message_payload,
             Encryption::Aes(ref encryption_token) => {
+                let rsa_crypto = self.rsa_crypto_fetcher.fetch(&user_token)?;
                 let mut proxy_message_payload = BytesMut::new();
                 proxy_message_payload.extend_from_slice(&encrypted_proxy_message_payload);
-                let original_encryption_token =
-                    Bytes::from(self.rsa_crypto.decrypt(encryption_token)?);
+                let original_encryption_token = Bytes::from(rsa_crypto.decrypt(encryption_token)?);
                 decrypt_with_aes(&original_encryption_token, &mut proxy_message_payload)?.freeze()
             }
         };
@@ -136,7 +145,10 @@ impl Decoder for ProxyConnectionCodec {
 }
 
 /// Encode the ppaass message to bytes buffer
-impl Encoder<AgentMessage> for ProxyConnectionCodec {
+impl<F> Encoder<AgentMessage> for ProxyConnectionCodec<F>
+where
+    F: RsaCryptoFetcher,
+{
     type Error = EncoderError;
 
     fn encode(
@@ -166,9 +178,8 @@ impl Encoder<AgentMessage> for ProxyConnectionCodec {
         {
             Encryption::Plain => (original_agent_message_payload, Encryption::Plain),
             Encryption::Aes(ref original_token) => {
-                let encrypted_encryption_token =
-                    Bytes::from(self.rsa_crypto.encrypt(original_token)?);
-
+                let rsa_crypto = self.rsa_crypto_fetcher.fetch(&user_token)?;
+                let encrypted_encryption_token = Bytes::from(rsa_crypto.encrypt(original_token)?);
                 let mut original_agent_message_payload = {
                     let mut agent_message_payload = BytesMut::new();
                     agent_message_payload.extend_from_slice(&original_agent_message_payload);

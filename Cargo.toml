@@ -9,10 +9,8 @@ version = "0.1.0"
 ppaass-protocol={git = "https://github.com/quhxuxm/ppaass-protocol.git", branch = "main"}
 ppaass-crypto={git = "https://github.com/quhxuxm/ppaass-crypto.git", branch = "main"}
 thiserror = "1.0"
-uuid={version="1.5", features = ["v4"]}
 bytes="1.5"
 tokio-util={version="0.7", features = ["codec"]}
 flate2="1.0"
 log="0.4"
 pretty-hex="0.3"
-nom="7.1"
