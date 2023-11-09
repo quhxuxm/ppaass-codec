@@ -6,25 +6,25 @@ use std::{
 use futures_util::{Sink, Stream};
 use pin_project::pin_project;
 use ppaass_crypto::{random_16_bytes, RsaCryptoFetcher};
-use ppaass_protocol::message::{AgentMessage, ProxyMessage};
+use ppaass_protocol::message::WrapperMessage;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
-use crate::{agent::AgentConnectionCodec, DecoderError, EncoderError};
+use crate::{ConnectionCodec, DecoderError, EncoderError};
 
 #[non_exhaustive]
 #[pin_project]
-pub struct AgentConnection<T, R>
+pub struct Connection<T, R>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     R: RsaCryptoFetcher + Send + Sync + 'static,
 {
     #[pin]
-    inner: Framed<T, AgentConnectionCodec<R>>,
+    inner: Framed<T, ConnectionCodec<R>>,
     connection_id: String,
 }
 
-impl<T, R> AgentConnection<T, R>
+impl<T, R> Connection<T, R>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     R: RsaCryptoFetcher + Send + Sync + 'static,
@@ -34,9 +34,9 @@ where
         rsa_crypto_fetcher: R,
         compress: bool,
         buffer_size: usize,
-    ) -> AgentConnection<T, R> {
-        let agent_connection_codec = AgentConnectionCodec::new(compress, rsa_crypto_fetcher);
-        let inner = Framed::with_capacity(stream, agent_connection_codec, buffer_size);
+    ) -> Connection<T, R> {
+        let _connection_codec = ConnectionCodec::new(compress, rsa_crypto_fetcher);
+        let inner = Framed::with_capacity(stream, _connection_codec, buffer_size);
         Self {
             inner,
             connection_id: String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
@@ -44,7 +44,7 @@ where
     }
 }
 
-impl<T, R> Sink<ProxyMessage> for AgentConnection<T, R>
+impl<T, R> Sink<WrapperMessage> for Connection<T, R>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     R: RsaCryptoFetcher + Send + Sync + 'static,
@@ -56,7 +56,7 @@ where
         this.inner.poll_ready(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: ProxyMessage) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: WrapperMessage) -> Result<(), Self::Error> {
         let this = self.project();
         this.inner.start_send(item)
     }
@@ -72,12 +72,12 @@ where
     }
 }
 
-impl<T, R> Stream for AgentConnection<T, R>
+impl<T, R> Stream for Connection<T, R>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     R: RsaCryptoFetcher + Send + Sync + 'static,
 {
-    type Item = Result<AgentMessage, DecoderError>;
+    type Item = Result<WrapperMessage, DecoderError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
