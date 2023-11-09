@@ -10,7 +10,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::{
     codec::{COMPRESS_FLAG, HEADER_LENGTH, PPAASS_FLAG, UNCOMPRESS_FLAG},
-    DecoderError,
+    DecoderError, EncoderError,
 };
 
 use super::DecodeStatus;
@@ -157,7 +157,7 @@ impl<F> Encoder<ProxyMessage> for AgentConnectionCodec<F>
 where
     F: RsaCryptoFetcher,
 {
-    type Error = DecoderError;
+    type Error = EncoderError;
 
     fn encode(
         &mut self,

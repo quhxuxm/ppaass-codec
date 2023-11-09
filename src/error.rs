@@ -25,3 +25,9 @@ pub enum DecoderError {
     #[error("Other error happen: {0:?}")]
     Other(String),
 }
+
+#[derive(Debug, Error)]
+pub enum ConnectionError {
+    #[error("I/O error happen: {0:?}")]
+    Io(#[from] std::io::Error),
+}

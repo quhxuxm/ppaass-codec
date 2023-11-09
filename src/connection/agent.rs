@@ -1,15 +1,16 @@
 use std::{
-    fmt::{Debug, Display},
     pin::Pin,
     task::{Context, Poll},
 };
 
+use futures_util::{Sink, Stream};
 use pin_project::pin_project;
 use ppaass_crypto::{random_16_bytes, RsaCryptoFetcher};
+use ppaass_protocol::message::{AgentMessage, ProxyMessage};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
-use crate::agent::AgentConnectionCodec;
+use crate::{agent::AgentConnectionCodec, DecoderError, EncoderError};
 
 #[non_exhaustive]
 #[pin_project]
@@ -38,29 +39,24 @@ where
         let inner = Framed::with_capacity(stream, agent_connection_codec, buffer_size);
         Self {
             inner,
-            connection_id: random_16_bytes(),
+            connection_id: String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
         }
-    }
-
-    pub fn get_connection_id(&self) -> &I {
-        &self.connection_id
     }
 }
 
-impl<T, R, I> Sink<PpaassProxyMessage> for PpaassAgentConnection<'_, T, R, I>
+impl<T, R> Sink<ProxyMessage> for AgentConnection<T, R>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     R: RsaCryptoFetcher + Send + Sync + 'static,
-    I: ToString + Send + Sync + Clone + Display + Debug + 'static,
 {
-    type Error = CommonError;
+    type Error = EncoderError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
         this.inner.poll_ready(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: PpaassProxyMessage) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: ProxyMessage) -> Result<(), Self::Error> {
         let this = self.project();
         this.inner.start_send(item)
     }
@@ -76,13 +72,12 @@ where
     }
 }
 
-impl<T, R, I> Stream for PpaassAgentConnection<'_, T, R, I>
+impl<T, R> Stream for AgentConnection<T, R>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     R: RsaCryptoFetcher + Send + Sync + 'static,
-    I: ToString + Send + Sync + Clone + Display + Debug + 'static,
 {
-    type Item = Result<PpaassAgentMessage, CommonError>;
+    type Item = Result<AgentMessage, DecoderError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
