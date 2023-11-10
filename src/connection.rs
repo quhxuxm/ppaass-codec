@@ -1,4 +1,5 @@
 use std::{
+    fmt::{Debug, Formatter},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -7,6 +8,7 @@ use futures_util::{Sink, Stream};
 use pin_project::pin_project;
 use ppaass_crypto::{random_16_bytes, RsaCryptoFetcher};
 use ppaass_protocol::message::WrapperMessage;
+use std::fmt::Result as FmtResult;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
@@ -41,6 +43,23 @@ where
             inner,
             connection_id: String::from_utf8_lossy(random_16_bytes().as_ref()).to_string(),
         }
+    }
+
+    pub fn get_connection_id(&self) -> &str {
+        &self.connection_id
+    }
+}
+
+impl<T, R> Debug for Connection<T, R>
+where
+    T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    R: RsaCryptoFetcher + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_struct("Connection")
+            .field("connection_id", &self.connection_id)
+            .field("inner", &"<OBJ>")
+            .finish()
     }
 }
 
