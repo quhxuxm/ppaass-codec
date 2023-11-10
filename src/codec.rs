@@ -6,7 +6,7 @@ use std::{
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use log::{error, trace};
-use ppaass_crypto::{decrypt_with_aes, encrypt_with_aes, RsaCryptoFetcher};
+use ppaass_crypto::{decrypt_with_aes, encrypt_with_aes, CryptoError, RsaCryptoFetcher};
 use ppaass_protocol::message::Encryption;
 use ppaass_protocol::message::WrapperMessage;
 use pretty_hex::*;
@@ -139,7 +139,12 @@ where
         let original_message_payload = match encryption {
             Encryption::Plain => encrypted_message_payload,
             Encryption::Aes(ref encryption_token) => {
-                let rsa_crypto = self.rsa_crypto_fetcher.fetch(&user_token)?;
+                let rsa_crypto =
+                    self.rsa_crypto_fetcher
+                        .fetch(&user_token)?
+                        .ok_or(CryptoError::Rsa(format!(
+                            "Crypto for user: {user_token} not found"
+                        )))?;
                 let original_encryption_token = Bytes::from(rsa_crypto.decrypt(encryption_token)?);
 
                 let mut encrypted_message_payload = {
@@ -194,7 +199,12 @@ where
         let (encrypted_message_payload, encrypted_payload_encryption) = match encryption {
             Encryption::Plain => (original_message_payload, Encryption::Plain),
             Encryption::Aes(ref original_encryption_token) => {
-                let rsa_crypto = self.rsa_crypto_fetcher.fetch(&user_token)?;
+                let rsa_crypto =
+                    self.rsa_crypto_fetcher
+                        .fetch(&user_token)?
+                        .ok_or(CryptoError::Rsa(format!(
+                            "Crypto for user: {user_token} not found"
+                        )))?;
                 let encrypted_encryption_token =
                     Bytes::from(rsa_crypto.encrypt(original_encryption_token)?);
                 let mut original_message_payload = {
