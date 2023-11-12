@@ -133,6 +133,7 @@ where
             user_token,
             encryption,
             payload: encrypted_message_payload,
+            payload_type,
             ..
         } = encrypted_message;
 
@@ -160,8 +161,13 @@ where
 
         self.status = DecodeStatus::Head;
         src.reserve(HEADER_LENGTH);
-        let message_framed =
-            WrapperMessage::new(unique_id, user_token, encryption, original_message_payload);
+        let message_framed = WrapperMessage::new(
+            unique_id,
+            user_token,
+            encryption,
+            payload_type,
+            original_message_payload,
+        );
         Ok(Some(message_framed))
     }
 }
@@ -193,6 +199,7 @@ where
             user_token,
             encryption,
             payload: original_message_payload,
+            payload_type,
             ..
         } = original_message;
 
@@ -226,6 +233,7 @@ where
             unique_id,
             user_token,
             encrypted_payload_encryption,
+            payload_type,
             encrypted_message_payload,
         );
         let bytes_framed: Bytes = message_to_encode.try_into()?;
