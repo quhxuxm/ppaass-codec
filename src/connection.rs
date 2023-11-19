@@ -6,11 +6,12 @@ use std::{
 
 use futures_util::{Sink, Stream};
 use pin_project::pin_project;
-use ppaass_crypto::{random_32_bytes, RsaCryptoFetcher};
+use ppaass_crypto::RsaCryptoFetcher;
 use ppaass_protocol::message::WrapperMessage;
 use std::fmt::Result as FmtResult;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
+use uuid::Uuid;
 
 use crate::{ConnectionCodec, DecoderError, EncoderError};
 
@@ -41,7 +42,7 @@ where
         let inner = Framed::with_capacity(stream, _connection_codec, buffer_size);
         Self {
             inner,
-            connection_id: String::from_utf8_lossy(random_32_bytes().as_ref()).to_string(),
+            connection_id: Uuid::new_v4().to_string(),
         }
     }
 
