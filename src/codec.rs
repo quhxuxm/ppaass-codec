@@ -129,7 +129,8 @@ where
         };
 
         let WrapperMessage {
-            unique_id,
+            message_id,
+            tunnel_id,
             user_token,
             encryption,
             payload: encrypted_message_payload,
@@ -162,7 +163,8 @@ where
         self.status = DecodeStatus::Head;
         src.reserve(HEADER_LENGTH);
         let message_framed = WrapperMessage::new(
-            unique_id,
+            message_id,
+            tunnel_id,
             user_token,
             encryption,
             payload_type,
@@ -195,7 +197,8 @@ where
             dst.put_u8(UNCOMPRESS_FLAG);
         }
         let WrapperMessage {
-            unique_id,
+            message_id,
+            tunnel_id,
             user_token,
             encryption,
             payload: original_message_payload,
@@ -230,7 +233,8 @@ where
         };
 
         let message_to_encode = WrapperMessage::new(
-            unique_id,
+            message_id,
+            tunnel_id,
             user_token,
             encrypted_payload_encryption,
             payload_type,
