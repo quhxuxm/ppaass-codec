@@ -22,8 +22,8 @@ const MAGIC_FLAG: &[u8] = "__PPAASS__".as_bytes();
 const HEADER_LENGTH: usize = MAGIC_FLAG.len() + size_of::<u8>() + size_of::<u64>();
 /// The compress flag
 const COMPRESS_FLAG: u8 = 1;
-/// The uncompress flag
-const UNCOMPRESS_FLAG: u8 = 0;
+/// The uncompressed flag
+const UNCOMPRESSED_FLAG: u8 = 0;
 
 /// The decoder status
 enum DecodeStatus {
@@ -127,6 +127,7 @@ where
         let WrapperMessage {
             message_id,
             secure_info,
+            tunnel,
             payload: encrypted_message_payload,
         } = encrypted_message;
 
@@ -137,9 +138,9 @@ where
                     .rsa_crypto_fetcher
                     .fetch(&secure_info.user_token)?
                     .ok_or(CryptoError::Rsa(format!(
-                        "Crypto for user: {} not found",
-                        secure_info.user_token
-                    )))?;
+                    "Crypto for user: {} not found when decoding message for tunnel: {tunnel:?}",
+                    secure_info.user_token
+                )))?;
                 let original_encryption_token = Bytes::from(rsa_crypto.decrypt(encryption_token)?);
 
                 let mut encrypted_message_payload = {
@@ -155,7 +156,8 @@ where
 
         self.status = DecodeStatus::Head;
         src.reserve(HEADER_LENGTH);
-        let message_framed = WrapperMessage::new(message_id, secure_info, original_message_payload);
+        let message_framed =
+            WrapperMessage::new(message_id, secure_info, tunnel, original_message_payload);
         Ok(Some(message_framed))
     }
 }
@@ -180,11 +182,12 @@ where
         if self.compress {
             dst.put_u8(COMPRESS_FLAG);
         } else {
-            dst.put_u8(UNCOMPRESS_FLAG);
+            dst.put_u8(UNCOMPRESSED_FLAG);
         }
         let WrapperMessage {
             message_id,
             secure_info,
+            tunnel,
             payload: original_message_payload,
         } = original_message;
 
@@ -196,9 +199,9 @@ where
                         .rsa_crypto_fetcher
                         .fetch(&secure_info.user_token)?
                         .ok_or(CryptoError::Rsa(format!(
-                            "Crypto for user: {} not found",
-                            secure_info.user_token
-                        )))?;
+                    "Crypto for user: {} not found when encoding message for tunnel: {tunnel:?}",
+                    secure_info.user_token
+                )))?;
                     let encrypted_encryption_token =
                         Bytes::from(rsa_crypto.encrypt(original_encryption_token)?);
                     let mut original_message_payload = {
@@ -221,8 +224,12 @@ where
             encryption: encrypted_payload_encryption,
         };
 
-        let message_to_encode =
-            WrapperMessage::new(message_id, encrypted_secure_info, encrypted_message_payload);
+        let message_to_encode = WrapperMessage::new(
+            message_id,
+            encrypted_secure_info,
+            tunnel,
+            encrypted_message_payload,
+        );
         let bytes_framed: Bytes = message_to_encode.try_into()?;
         let bytes_framed = if self.compress {
             let encoder_buf = BytesMut::new();
