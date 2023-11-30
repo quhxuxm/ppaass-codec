@@ -7,19 +7,19 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use log::{error, trace};
 use ppaass_crypto::{decrypt_with_aes, encrypt_with_aes, CryptoError, RsaCryptoFetcher};
-use ppaass_protocol::message::Encryption;
 use ppaass_protocol::message::WrapperMessage;
+use ppaass_protocol::values::security::{Encryption, SecureInfo};
+
+use crate::{DecoderError, EncoderError};
 use pretty_hex::*;
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::{DecoderError, EncoderError};
-
 /// Each ppaass message will start with a magic word "__PPAASS__"
-const PPAASS_FLAG: &[u8] = "__PPAASS__".as_bytes();
+const MAGIC_FLAG: &[u8] = "__PPAASS__".as_bytes();
 /// Each ppaass message will start with the "__PPAASS__",
 /// then 1 byte for compress flag,
 /// then the length of the whole message
-const HEADER_LENGTH: usize = PPAASS_FLAG.len() + size_of::<u8>() + size_of::<u64>();
+const HEADER_LENGTH: usize = MAGIC_FLAG.len() + size_of::<u8>() + size_of::<u64>();
 /// The compress flag
 const COMPRESS_FLAG: u8 = 1;
 /// The uncompress flag
@@ -72,11 +72,11 @@ where
                     src.reserve(HEADER_LENGTH);
                     return Ok(None);
                 }
-                let ppaass_flag = src.split_to(PPAASS_FLAG.len());
-                if !PPAASS_FLAG.eq(&ppaass_flag) {
+                let ppaass_flag = src.split_to(MAGIC_FLAG.len());
+                if !MAGIC_FLAG.eq(&ppaass_flag) {
                     return Err(DecoderError::Other(format!(
                         "The incoming message is not begin with {:?}",
-                        PPAASS_FLAG
+                        MAGIC_FLAG
                     )));
                 }
                 let compressed = src.get_u8() == 1;
@@ -114,10 +114,6 @@ where
                 return Err(DecoderError::Io(e));
             };
             let decompressed_bytes = Bytes::from_iter(decompressed_bytes);
-            trace!(
-                "Decompressed bytes will convert to PpaassMessage:\n{}\n",
-                pretty_hex::pretty_hex(&decompressed_bytes)
-            );
             let encrypted_message: WrapperMessage = decompressed_bytes.try_into()?;
             encrypted_message
         } else {
@@ -130,23 +126,20 @@ where
 
         let WrapperMessage {
             message_id,
-            tunnel_id,
-            user_token,
-            encryption,
+            secure_info,
             payload: encrypted_message_payload,
-            payload_type,
-            ..
         } = encrypted_message;
 
-        let original_message_payload = match encryption {
+        let original_message_payload = match &secure_info.encryption {
             Encryption::Plain => encrypted_message_payload,
             Encryption::Aes(ref encryption_token) => {
-                let rsa_crypto =
-                    self.rsa_crypto_fetcher
-                        .fetch(&user_token)?
-                        .ok_or(CryptoError::Rsa(format!(
-                            "Crypto for user: {user_token} not found"
-                        )))?;
+                let rsa_crypto = self
+                    .rsa_crypto_fetcher
+                    .fetch(&secure_info.user_token)?
+                    .ok_or(CryptoError::Rsa(format!(
+                        "Crypto for user: {} not found",
+                        secure_info.user_token
+                    )))?;
                 let original_encryption_token = Bytes::from(rsa_crypto.decrypt(encryption_token)?);
 
                 let mut encrypted_message_payload = {
@@ -162,14 +155,7 @@ where
 
         self.status = DecodeStatus::Head;
         src.reserve(HEADER_LENGTH);
-        let message_framed = WrapperMessage::new(
-            message_id,
-            tunnel_id,
-            user_token,
-            encryption,
-            payload_type,
-            original_message_payload,
-        );
+        let message_framed = WrapperMessage::new(message_id, secure_info, original_message_payload);
         Ok(Some(message_framed))
     }
 }
@@ -190,7 +176,7 @@ where
             "Encode message to output(decrypted): {:?}",
             original_message
         );
-        dst.put(PPAASS_FLAG);
+        dst.put(MAGIC_FLAG);
         if self.compress {
             dst.put_u8(COMPRESS_FLAG);
         } else {
@@ -198,48 +184,45 @@ where
         }
         let WrapperMessage {
             message_id,
-            tunnel_id,
-            user_token,
-            encryption,
+            secure_info,
             payload: original_message_payload,
-            payload_type,
-            ..
         } = original_message;
 
-        let (encrypted_message_payload, encrypted_payload_encryption) = match encryption {
-            Encryption::Plain => (original_message_payload, Encryption::Plain),
-            Encryption::Aes(ref original_encryption_token) => {
-                let rsa_crypto =
-                    self.rsa_crypto_fetcher
-                        .fetch(&user_token)?
+        let (encrypted_message_payload, encrypted_payload_encryption) =
+            match &secure_info.encryption {
+                Encryption::Plain => (original_message_payload, Encryption::Plain),
+                Encryption::Aes(ref original_encryption_token) => {
+                    let rsa_crypto = self
+                        .rsa_crypto_fetcher
+                        .fetch(&secure_info.user_token)?
                         .ok_or(CryptoError::Rsa(format!(
-                            "Crypto for user: {user_token} not found"
+                            "Crypto for user: {} not found",
+                            secure_info.user_token
                         )))?;
-                let encrypted_encryption_token =
-                    Bytes::from(rsa_crypto.encrypt(original_encryption_token)?);
-                let mut original_message_payload = {
-                    let mut message_payload = BytesMut::new();
-                    message_payload.extend_from_slice(&original_message_payload);
-                    message_payload
-                };
-                let encrypted_message_payload =
-                    encrypt_with_aes(original_encryption_token, &mut original_message_payload)?
-                        .freeze();
-                (
-                    encrypted_message_payload,
-                    Encryption::Aes(encrypted_encryption_token),
-                )
-            }
+                    let encrypted_encryption_token =
+                        Bytes::from(rsa_crypto.encrypt(original_encryption_token)?);
+                    let mut original_message_payload = {
+                        let mut message_payload = BytesMut::new();
+                        message_payload.extend_from_slice(&original_message_payload);
+                        message_payload
+                    };
+                    let encrypted_message_payload =
+                        encrypt_with_aes(original_encryption_token, &mut original_message_payload)?
+                            .freeze();
+                    (
+                        encrypted_message_payload,
+                        Encryption::Aes(encrypted_encryption_token),
+                    )
+                }
+            };
+
+        let encrypted_secure_info = SecureInfo {
+            user_token: secure_info.user_token,
+            encryption: encrypted_payload_encryption,
         };
 
-        let message_to_encode = WrapperMessage::new(
-            message_id,
-            tunnel_id,
-            user_token,
-            encrypted_payload_encryption,
-            payload_type,
-            encrypted_message_payload,
-        );
+        let message_to_encode =
+            WrapperMessage::new(message_id, encrypted_secure_info, encrypted_message_payload);
         let bytes_framed: Bytes = message_to_encode.try_into()?;
         let bytes_framed = if self.compress {
             let encoder_buf = BytesMut::new();
