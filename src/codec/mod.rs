@@ -3,8 +3,8 @@ use bytes::{Buf, BytesMut};
 use log::trace;
 use std::mem::size_of;
 
-mod agent;
-mod proxy;
+pub mod agent;
+pub mod proxy;
 
 /// Each ppaass message will start with a magic word "__PPAASS__"
 const MAGIC_FLAG: &[u8] = "__PPAASS__".as_bytes();
