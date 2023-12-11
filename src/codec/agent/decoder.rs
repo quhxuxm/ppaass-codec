@@ -11,7 +11,7 @@ use ppaass_protocol::message::agent::{
 use ppaass_protocol::values::security::Encryption;
 
 use crate::codec::{decode_header, DecodeStatus, HEADER_LENGTH};
-use crate::error::DecoderError;
+use crate::error::CodecError;
 use pretty_hex::*;
 use tokio_util::codec::Decoder;
 
@@ -42,7 +42,7 @@ where
     F: RsaCryptoFetcher,
 {
     type Item = AgentMessage;
-    type Error = DecoderError;
+    type Error = CodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match self.status {
@@ -76,7 +76,7 @@ where
                     let mut decompressed_bytes = Vec::new();
                     if let Err(e) = gzip_decoder.read_to_end(&mut decompressed_bytes) {
                         error!("Fail to decompress incoming agent message bytes because of error: {e:?}");
-                        return Err(DecoderError::Io(e));
+                        return Err(CodecError::Io(e));
                     };
                     let decompressed_bytes = Bytes::from_iter(decompressed_bytes);
                     let encrypted_message: EncodedAgentMessage = decompressed_bytes.try_into()?;

@@ -10,7 +10,7 @@ use ppaass_protocol::message::agent::{
 use ppaass_protocol::values::security::{Encryption, SecureInfo};
 
 use crate::codec::{COMPRESS_FLAG, MAGIC_FLAG, UNCOMPRESSED_FLAG};
-use crate::error::EncoderError;
+use crate::error::CodecError;
 
 use tokio_util::codec::Encoder;
 
@@ -39,7 +39,7 @@ impl<F> Encoder<AgentMessage> for AgentMessageEncoder<F>
 where
     F: RsaCryptoFetcher,
 {
-    type Error = EncoderError;
+    type Error = CodecError;
 
     fn encode(
         &mut self,

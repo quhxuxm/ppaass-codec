@@ -1,4 +1,4 @@
-use crate::error::DecoderError;
+use crate::error::CodecError;
 use bytes::{Buf, BytesMut};
 use log::trace;
 use std::mem::size_of;
@@ -23,7 +23,7 @@ enum DecodeStatus {
     Data(bool, u64),
 }
 
-fn decode_header(src: &mut BytesMut) -> Result<Option<(bool, u64)>, DecoderError> {
+fn decode_header(src: &mut BytesMut) -> Result<Option<(bool, u64)>, CodecError> {
     if src.len() < HEADER_LENGTH {
         trace!(
             "Input message is not enough to decode header, header length: {}",
@@ -34,7 +34,7 @@ fn decode_header(src: &mut BytesMut) -> Result<Option<(bool, u64)>, DecoderError
     }
     let ppaass_flag = src.split_to(MAGIC_FLAG.len());
     if !MAGIC_FLAG.eq(&ppaass_flag) {
-        return Err(DecoderError::Other(format!(
+        return Err(CodecError::Other(format!(
             "The incoming message is not begin with {:?}",
             MAGIC_FLAG
         )));
