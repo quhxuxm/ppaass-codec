@@ -56,7 +56,7 @@ where
                     }
                 };
                 self.status = DecodeStatus::Data(compressed, body_length);
-                return Ok(None);
+                Ok(None)
             }
             DecodeStatus::Data(compressed, body_length) => {
                 if src.remaining() < body_length as usize {
