@@ -92,7 +92,6 @@ where
                 let EncodedAgentMessage {
                     message_id,
                     secure_info,
-                    tunnel,
                     payload: encrypted_message_payload,
                 } = encrypted_agent_message;
 
@@ -116,7 +115,7 @@ where
                             .rsa_crypto_fetcher
                             .fetch(&secure_info.user_token)?
                             .ok_or(CryptoError::Rsa(format!(
-                                "Crypto for user: {} not found when decoding message for tunnel: {tunnel:?}",
+                                "Crypto for user: {} not found when decoding message",
                                 secure_info.user_token
                             )))?;
                         let original_encryption_token =
@@ -166,7 +165,6 @@ where
                 let agent_message = AgentMessage {
                     message_id,
                     secure_info,
-                    tunnel,
                     payload: agent_message_payload,
                 };
                 Ok(Some(agent_message))

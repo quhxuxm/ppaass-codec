@@ -56,7 +56,6 @@ where
         let ProxyMessage {
             message_id,
             secure_info,
-            tunnel,
             payload: original_message_payload,
         } = proxy_message;
 
@@ -78,7 +77,6 @@ where
                 EncodedProxyMessage {
                     message_id,
                     secure_info,
-                    tunnel,
                     payload: proxy_message_payload,
                 }
             }
@@ -87,9 +85,9 @@ where
                     .rsa_crypto_fetcher
                     .fetch(&secure_info.user_token)?
                     .ok_or(CryptoError::Rsa(format!(
-                    "Crypto for user: {} not found when encoding message for tunnel: {tunnel:?}",
-                    secure_info.user_token
-                )))?;
+                        "Crypto for user: {} not found when encoding message",
+                        secure_info.user_token
+                    )))?;
                 let encrypted_encryption_token =
                     Bytes::from(rsa_crypto.encrypt(original_encryption_token)?);
                 let encrypted_secure_info = SecureInfo {
@@ -137,7 +135,6 @@ where
                 EncodedProxyMessage {
                     message_id,
                     secure_info: encrypted_secure_info,
-                    tunnel,
                     payload: encrypted_proxy_message_payload,
                 }
             }
