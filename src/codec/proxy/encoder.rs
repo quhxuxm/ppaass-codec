@@ -9,7 +9,7 @@ use ppaass_protocol::message::proxy::{
 };
 use ppaass_protocol::values::security::{Encryption, SecureInfo};
 
-use crate::codec::{COMPRESS_FLAG, MAGIC_FLAG, UNCOMPRESSED_FLAG};
+use crate::codec::{COMPRESS_FLAG, UNCOMPRESSED_FLAG};
 use crate::error::CodecError;
 
 use tokio_util::codec::Encoder;
@@ -47,7 +47,6 @@ where
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         trace!("Encode proxy message to output: {proxy_message:?}");
-        dst.put(MAGIC_FLAG);
         if self.compress {
             dst.put_u8(COMPRESS_FLAG);
         } else {
