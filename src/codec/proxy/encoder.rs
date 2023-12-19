@@ -46,7 +46,7 @@ where
         proxy_message: ProxyMessage,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
-        trace!("Encode proxy message to output: {:?}", proxy_message);
+        trace!("Encode proxy message to output: {proxy_message:?}");
         dst.put(MAGIC_FLAG);
         if self.compress {
             dst.put_u8(COMPRESS_FLAG);

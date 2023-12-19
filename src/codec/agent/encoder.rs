@@ -46,7 +46,7 @@ where
         agent_message: AgentMessage,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
-        trace!("Encode agent message to output: {:?}", agent_message);
+        trace!("Encode agent message to output: {agent_message:?}");
         dst.put(MAGIC_FLAG);
         if self.compress {
             dst.put_u8(COMPRESS_FLAG);
