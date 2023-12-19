@@ -79,8 +79,7 @@ where
                         return Err(CodecError::Io(e));
                     };
                     let decompressed_bytes = Bytes::from_iter(decompressed_bytes);
-                    let encrypted_message: EncodedAgentMessage = decompressed_bytes.try_into()?;
-                    encrypted_message
+                    decompressed_bytes.try_into()?
                 } else {
                     trace!(
                         "Raw bytes will convert to PpaassMessage:\n{}\n",
@@ -88,6 +87,7 @@ where
                     );
                     body_bytes.freeze().try_into()?
                 };
+                trace!("Get decoded encrypted agent message: {encrypted_agent_message:?}");
 
                 let EncodedAgentMessage {
                     message_id,
@@ -160,6 +160,7 @@ where
                         }
                     }
                 };
+                trace!("Get decoded decrypted agent message: {agent_message_payload:?}");
                 self.status = DecodeStatus::Head;
                 src.reserve(HEADER_LENGTH);
                 let agent_message = AgentMessage {

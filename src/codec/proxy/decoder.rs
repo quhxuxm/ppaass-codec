@@ -88,6 +88,7 @@ where
                     );
                     body_bytes.freeze().try_into()?
                 };
+                trace!("Get decoded encrypted proxy message: {encrypted_proxy_message:?}");
 
                 let EncodedProxyMessage {
                     message_id,
@@ -160,6 +161,7 @@ where
                         }
                     }
                 };
+                trace!("Get decoded decrypted proxy message: {proxy_message_payload:?}");
                 self.status = DecodeStatus::Head;
                 src.reserve(HEADER_LENGTH);
                 let proxy_message = ProxyMessage {
