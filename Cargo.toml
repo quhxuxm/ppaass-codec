@@ -2,12 +2,14 @@
 edition = "2021"
 name = "ppaass-codec"
 version = "0.1.0"
+description="The codec part for ppaass application"
+license="MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ppaass-protocol={git = "https://github.com/quhxuxm/ppaass-protocol.git", branch = "main"}
-ppaass-crypto={git = "https://github.com/quhxuxm/ppaass-crypto.git", branch = "main"}
+ppaass-protocol="0.1"
+ppaass-crypto="0.1"
 thiserror = "1.0"
 bytes="1.5"
 tokio-util={version="0.7", features = ["codec"]}
