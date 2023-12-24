@@ -124,7 +124,7 @@ where
     }
 }
 
-pub(crate) struct PpaassAgentMessageDecoder<T>
+pub struct PpaassAgentMessageDecoder<T>
 where
     T: RsaCryptoFetcher,
 {
