@@ -28,6 +28,7 @@ where
 {
     rsa_crypto_fetcher: T,
     compress: bool,
+    non_plain_encrypted_encryption_token_cache: Option<Bytes>,
 }
 
 impl<T> PpaassProxyMessageEncoder<T>
@@ -38,6 +39,7 @@ where
         Self {
             compress,
             rsa_crypto_fetcher,
+            non_plain_encrypted_encryption_token_cache: None,
         }
     }
 }
@@ -89,7 +91,17 @@ where
             ),
             PpaassMessagePayloadEncryption::Aes(ref original_token) => {
                 let encrypted_payload_encryption_token =
-                    Bytes::from(rsa_crypto.encrypt(original_token)?);
+                    match self.non_plain_encrypted_encryption_token_cache {
+                        None => {
+                            let encrypted_encryption_token =
+                                Bytes::from(rsa_crypto.encrypt(original_token)?);
+                            self.non_plain_encrypted_encryption_token_cache =
+                                Some(encrypted_encryption_token.clone());
+                            encrypted_encryption_token
+                        }
+                        Some(ref token) => token.clone(),
+                    };
+
                 let original_message_payload: Bytes = original_message_payload.try_into()?;
                 let mut original_message_payload_data = BytesMut::new();
                 original_message_payload_data.put(original_message_payload);
@@ -130,6 +142,7 @@ where
 {
     rsa_crypto_fetcher: T,
     status: DecodeStatus,
+    non_plain_original_encryption_token_cache: Option<Bytes>,
 }
 
 impl<T> PpaassProxyMessageDecoder<T>
@@ -140,6 +153,7 @@ where
         Self {
             rsa_crypto_fetcher,
             status: DecodeStatus::Head,
+            non_plain_original_encryption_token_cache: None,
         }
     }
 }
@@ -236,10 +250,20 @@ where
         let decrypt_payload_bytes = match payload_encryption {
             PpaassMessagePayloadEncryption::Plain => encrypted_message_payload,
             PpaassMessagePayloadEncryption::Aes(ref encryption_token) => {
+                let original_encryption_token = match self.non_plain_original_encryption_token_cache
+                {
+                    None => {
+                        let original_encryption_token =
+                            Bytes::from(rsa_crypto.decrypt(encryption_token)?);
+                        self.non_plain_original_encryption_token_cache =
+                            Some(original_encryption_token.clone());
+                        original_encryption_token
+                    }
+                    Some(ref token) => token.clone(),
+                };
                 let mut encrypted_message_payload_data =
                     BytesMut::from_iter(encrypted_message_payload);
 
-                let original_encryption_token = Bytes::from(rsa_crypto.decrypt(encryption_token)?);
                 decrypt_with_aes(
                     &original_encryption_token,
                     &mut encrypted_message_payload_data,
