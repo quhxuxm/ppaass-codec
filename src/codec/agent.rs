@@ -1,75 +1,54 @@
-use std::{
-    io::{Read, Write},
-    mem::size_of,
-};
-
+use super::DecodeStatus;
 use crate::error::CodecError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use log::{error, trace};
 use ppaass_crypto::crypto::{decrypt_with_aes, encrypt_with_aes, RsaCryptoFetcher};
 use ppaass_crypto::error::CryptoError;
-use ppaass_protocol::message::values::encryption::PpaassMessagePayloadEncryption;
-use ppaass_protocol::message::{CodecPpaassMessage, PpaassAgentMessage};
+use ppaass_protocol::message::{Encryption, Packet};
 use pretty_hex::*;
+use std::{
+    io::{Read, Write},
+    mem::size_of,
+};
 use tokio_util::codec::{Decoder, Encoder};
-
-use super::DecodeStatus;
-
 const PPAASS_FLAG: &[u8] = "__PPAASS__".as_bytes();
-const HEADER_LENGTH: usize = PPAASS_FLAG.len() + size_of::<u8>() + size_of::<u64>();
-const COMPRESS_FLAG: u8 = 1;
-const UN_COMPRESS_FLAG: u8 = 1;
+const HEADER_LENGTH: usize = PPAASS_FLAG.len() + size_of::<u64>();
 
-pub struct PpaassAgentMessageEncoder<T>
+pub struct MessageEncoder<T>
 where
     T: RsaCryptoFetcher,
 {
     rsa_crypto_fetcher: T,
-    compress: bool,
-    non_plain_encrypted_encryption_token_cache: Option<Bytes>,
 }
 
-impl<T> PpaassAgentMessageEncoder<T>
+impl<T> MessageEncoder<T>
 where
     T: RsaCryptoFetcher,
 {
     pub fn new(compress: bool, rsa_crypto_fetcher: T) -> Self {
-        Self {
-            compress,
-            rsa_crypto_fetcher,
-            non_plain_encrypted_encryption_token_cache: None,
-        }
+        Self { rsa_crypto_fetcher }
     }
 }
 
 /// Encode the ppaass message to bytes buffer
-impl<T> Encoder<PpaassAgentMessage> for PpaassAgentMessageEncoder<T>
+impl<T> Encoder<Packet> for MessageEncoder<T>
 where
     T: RsaCryptoFetcher,
 {
     type Error = CodecError;
 
-    fn encode(
-        &mut self,
-        original_message: PpaassAgentMessage,
-        dst: &mut BytesMut,
-    ) -> Result<(), Self::Error> {
+    fn encode(&mut self, original_message: Packet, dst: &mut BytesMut) -> Result<(), Self::Error> {
         trace!(
             "Encode message to output(decrypted): {:?}",
             original_message
         );
         dst.put(PPAASS_FLAG);
-        if self.compress {
-            dst.put_u8(COMPRESS_FLAG);
-        } else {
-            dst.put_u8(UN_COMPRESS_FLAG);
-        }
-        let PpaassAgentMessage {
-            message_id,
+        let Packet {
+            packet_id,
             user_token,
-            encryption: payload_encryption,
-            payload: original_message_payload,
+            encryption,
+            payload,
         } = original_message;
 
         let rsa_crypto = self
@@ -79,63 +58,41 @@ where
                 "Crypto not exist for user: {user_token}"
             )))?;
 
-        let (encrypted_payload_bytes, encrypted_payload_encryption_type) = match payload_encryption
-        {
-            PpaassMessagePayloadEncryption::Plain => (
-                {
-                    let original_message_payload: Bytes = original_message_payload.try_into()?;
-                    original_message_payload
-                },
-                PpaassMessagePayloadEncryption::Plain,
-            ),
-            PpaassMessagePayloadEncryption::Aes(ref original_token) => {
-                let encrypted_payload_encryption_token =
-                    match self.non_plain_encrypted_encryption_token_cache {
-                        None => {
-                            let encrypted_encryption_token =
-                                Bytes::from(rsa_crypto.encrypt(original_token)?);
-                            self.non_plain_encrypted_encryption_token_cache =
-                                Some(encrypted_encryption_token.clone());
-                            encrypted_encryption_token
-                        }
-                        Some(ref token) => token.clone(),
-                    };
+        let (encrypted_payload_bytes, encrypted_encryption) = match encryption {
+            Encryption::Plain => (payload, Encryption::Plain),
+            Encryption::Aes(ref original_aes_token) => {
+                let rsa_encrypted_aes_token = Bytes::from(rsa_crypto.encrypt(original_aes_token)?);
 
-                let original_message_payload: Bytes = original_message_payload.try_into()?;
-                let mut original_message_payload_mut = BytesMut::new();
-                original_message_payload_mut.put(original_message_payload);
-                let message_payload_data =
-                    encrypt_with_aes(original_token, &mut original_message_payload_mut)?.freeze();
+                let mut original_payload_bytes: BytesMut = BytesMut::from_iter(payload);
+
+                let aes_encrypted_payload_bytes =
+                    encrypt_with_aes(original_aes_token, &mut original_payload_bytes)?.freeze();
                 (
-                    message_payload_data,
-                    PpaassMessagePayloadEncryption::Aes(encrypted_payload_encryption_token),
+                    aes_encrypted_payload_bytes,
+                    Encryption::Aes(rsa_encrypted_aes_token),
                 )
             }
         };
 
-        let message_to_encode = CodecPpaassMessage::new(
-            message_id,
+        let packet = Packet::new(
+            packet_id,
             user_token,
-            encrypted_payload_encryption_type,
+            encrypted_encryption,
             encrypted_payload_bytes,
         );
-        let result_bytes: Bytes = message_to_encode.try_into()?;
-        let result_bytes = if self.compress {
-            let encoder_buf = BytesMut::new();
-            let mut gzip_encoder = GzEncoder::new(encoder_buf.writer(), Compression::fast());
-            gzip_encoder.write_all(&result_bytes)?;
-            gzip_encoder.finish()?.into_inner().freeze()
-        } else {
-            result_bytes
-        };
-        let result_bytes_length = result_bytes.len();
+        let packet_bytes: Bytes = packet.try_into()?;
+        let gz_encoder_buf = BytesMut::new();
+        let mut gzip_encoder = GzEncoder::new(gz_encoder_buf.writer(), Compression::fast());
+        gzip_encoder.write_all(&packet_bytes)?;
+        let packet_bytes = gzip_encoder.finish()?.into_inner().freeze();
+        let result_bytes_length = packet_bytes.len();
         dst.put_u64(result_bytes_length as u64);
-        dst.put(result_bytes.as_ref());
+        dst.put(packet_bytes.as_ref());
         Ok(())
     }
 }
 
-pub struct PpaassAgentMessageDecoder<T>
+pub struct PacketDecoder<T>
 where
     T: RsaCryptoFetcher,
 {
@@ -144,7 +101,7 @@ where
     non_plain_original_encryption_token_cache: Option<Bytes>,
 }
 
-impl<T> PpaassAgentMessageDecoder<T>
+impl<T> PacketDecoder<T>
 where
     T: RsaCryptoFetcher,
 {
@@ -158,11 +115,11 @@ where
 }
 
 /// Decode the input bytes buffer to ppaass message
-impl<T> Decoder for PpaassAgentMessageDecoder<T>
+impl<T> Decoder for PacketDecoder<T>
 where
     T: RsaCryptoFetcher,
 {
-    type Item = PpaassAgentMessage;
+    type Item = Packet;
     type Error = CodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -266,7 +223,7 @@ where
         };
         self.status = DecodeStatus::Head;
         src.reserve(HEADER_LENGTH);
-        let message_framed = PpaassAgentMessage::new(
+        let message_framed = Packet::new(
             message_id,
             user_token,
             payload_encryption,
