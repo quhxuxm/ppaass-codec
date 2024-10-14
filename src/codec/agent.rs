@@ -11,7 +11,7 @@ use std::{
     io::{Read, Write},
     mem::size_of,
 };
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 const PPAASS_FLAG: &[u8] = "__PPAASS__".as_bytes();
 const HEADER_LENGTH: usize = PPAASS_FLAG.len() + size_of::<u64>();
 
@@ -20,14 +20,18 @@ where
     T: RsaCryptoFetcher,
 {
     rsa_crypto_fetcher: T,
+    length_delimited_codec: LengthDelimitedCodec,
 }
 
 impl<T> MessageEncoder<T>
 where
     T: RsaCryptoFetcher,
 {
-    pub fn new(compress: bool, rsa_crypto_fetcher: T) -> Self {
-        Self { rsa_crypto_fetcher }
+    pub fn new(rsa_crypto_fetcher: T) -> Self {
+        Self {
+            rsa_crypto_fetcher,
+            length_delimited_codec: LengthDelimitedCodec::new(),
+        }
     }
 }
 
@@ -38,19 +42,13 @@ where
 {
     type Error = CodecError;
 
-    fn encode(&mut self, original_message: Packet, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        trace!(
-            "Encode message to output(decrypted): {:?}",
-            original_message
-        );
-        dst.put(PPAASS_FLAG);
+    fn encode(&mut self, original_packet: Packet, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let Packet {
             packet_id,
             user_token,
             encryption,
             payload,
-        } = original_message;
-
+        } = original_packet;
         let rsa_crypto = self
             .rsa_crypto_fetcher
             .fetch(&user_token)?
@@ -74,20 +72,19 @@ where
             }
         };
 
-        let packet = Packet::new(
+        let packet_to_send = Packet::new(
             packet_id,
             user_token,
             encrypted_encryption,
             encrypted_payload_bytes,
         );
-        let packet_bytes: Bytes = packet.try_into()?;
+        let packet_bytes_to_send: Bytes = packet_to_send.try_into()?;
         let gz_encoder_buf = BytesMut::new();
         let mut gzip_encoder = GzEncoder::new(gz_encoder_buf.writer(), Compression::fast());
-        gzip_encoder.write_all(&packet_bytes)?;
-        let packet_bytes = gzip_encoder.finish()?.into_inner().freeze();
-        let result_bytes_length = packet_bytes.len();
-        dst.put_u64(result_bytes_length as u64);
-        dst.put(packet_bytes.as_ref());
+        gzip_encoder.write_all(&packet_bytes_to_send)?;
+        let packet_bytes_to_send = gzip_encoder.finish()?.into_inner().freeze();
+        self.length_delimited_codec
+            .encode(packet_bytes_to_send, dst)?;
         Ok(())
     }
 }
@@ -97,8 +94,7 @@ where
     T: RsaCryptoFetcher,
 {
     rsa_crypto_fetcher: T,
-    status: DecodeStatus,
-    non_plain_original_encryption_token_cache: Option<Bytes>,
+    length_delimited_codec: LengthDelimitedCodec,
 }
 
 impl<T> PacketDecoder<T>
@@ -108,8 +104,7 @@ where
     pub fn new(rsa_crypto_fetcher: T) -> Self {
         Self {
             rsa_crypto_fetcher,
-            status: DecodeStatus::Head,
-            non_plain_original_encryption_token_cache: None,
+            length_delimited_codec: LengthDelimitedCodec::new(),
         }
     }
 }
@@ -123,6 +118,38 @@ where
     type Error = CodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let length_decode_result = self.length_delimited_codec.decode(src)?;
+        let decompressed_packet: Packet = match length_decode_result {
+            None => return Ok(None),
+            Some(packet_bytes) => {
+                let mut gzip_decoder = GzDecoder::new(packet_bytes.reader());
+                let mut decompressed_packet_bytes = Vec::new();
+                if let Err(e) = gzip_decoder.read_to_end(&mut decompressed_packet_bytes) {
+                    error!("Fail to decompress incoming message bytes because of error: {e:?}");
+                    return Err(CodecError::StdIo(e));
+                };
+                let decompressed_packet_bytes = Bytes::from_iter(decompressed_packet_bytes);
+                decompressed_packet_bytes.try_into()?
+            }
+        };
+        let decrypted_packed = match decompressed_packet.encryption() {
+            Encryption::Plain => decompressed_packet,
+            Encryption::Aes(rsa_encrypted_aes_token) => {
+                let rsa_crypto = self
+                    .rsa_crypto_fetcher
+                    .fetch(decompressed_packet.user_token())?
+                    .ok_or(CryptoError::Other(format!(
+                        "Crypto not exist for user: {}",
+                        decompressed_packet.user_token()
+                    )))?;
+                let decrypted_aes_token = Bytes::from(rsa_crypto.decrypt(rsa_encrypted_aes_token)?);
+                let mut decrypted_payload_bytes =
+                    BytesMut::from_iter(decompressed_packet.payload());
+                decrypt_with_aes(&decrypted_aes_token, &mut decrypted_payload)?.freeze();
+                todo!()
+            }
+        };
+
         let (compressed, body_length) = match self.status {
             DecodeStatus::Head => {
                 if src.len() < HEADER_LENGTH {

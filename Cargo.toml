@@ -8,7 +8,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ppaass-protocol = "0.1.5"
+ppaass-protocol = "0.1.6"
 ppaass-crypto = "0"
 thiserror = "1"
 bytes = "1"
