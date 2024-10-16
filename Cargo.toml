@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "ppaass-codec"
-version = "0.1.6"
+version = "0.1.7"
 description = "The codec part for ppaass application"
 license = "MIT"
 
@@ -14,6 +14,6 @@ thiserror = "1"
 bytes = "1"
 tokio-util = { version = "0", features = ["codec"] }
 flate2 = "1"
-log = "0"
+tracing = "0.1"
 pretty-hex = "0"
 bincode = "1"
