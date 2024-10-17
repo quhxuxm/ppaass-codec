@@ -7,19 +7,19 @@ use ppaass_protocol::message::{Encryption, Packet};
 use std::io::{Read, Write};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 use tracing::error;
-pub struct MessageEncoder<T>
+struct PacketEncoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
-    rsa_crypto_fetcher: T,
+    rsa_crypto_fetcher: &'a T,
     length_delimited_codec: LengthDelimitedCodec,
 }
 
-impl<T> MessageEncoder<T>
+impl<'a, T> PacketEncoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
-    pub fn new(rsa_crypto_fetcher: T) -> Self {
+    pub fn new(rsa_crypto_fetcher: &'a T) -> Self {
         Self {
             rsa_crypto_fetcher,
             length_delimited_codec: LengthDelimitedCodec::new(),
@@ -28,7 +28,7 @@ where
 }
 
 /// Encode the ppaass message to bytes buffer
-impl<T> Encoder<Packet> for MessageEncoder<T>
+impl<'a, T> Encoder<Packet> for PacketEncoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
@@ -75,19 +75,19 @@ where
     }
 }
 
-pub struct PacketDecoder<T>
+struct PacketDecoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
-    rsa_crypto_fetcher: T,
+    rsa_crypto_fetcher: &'a T,
     length_delimited_codec: LengthDelimitedCodec,
 }
 
-impl<T> PacketDecoder<T>
+impl<'a, T> PacketDecoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
-    pub fn new(rsa_crypto_fetcher: T) -> Self {
+    pub fn new(rsa_crypto_fetcher: &'a T) -> Self {
         Self {
             rsa_crypto_fetcher,
             length_delimited_codec: LengthDelimitedCodec::new(),
@@ -96,7 +96,7 @@ where
 }
 
 /// Decode the input bytes buffer to ppaass message
-impl<T> Decoder for PacketDecoder<T>
+impl<'a, T> Decoder for PacketDecoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
@@ -142,5 +142,25 @@ where
             }
         };
         Ok(Some(decrypted_packed))
+    }
+}
+
+pub struct PacketCodec<'a, T>
+where
+    T: RsaCryptoFetcher,
+{
+    encoder: PacketEncoder<'a, T>,
+    decoder: PacketDecoder<'a, T>,
+}
+
+impl<'a, T> PacketCodec<'a, T>
+where
+    T: RsaCryptoFetcher,
+{
+    pub fn new(rsa_crypto_fetcher: &'a T) -> Self {
+        Self {
+            encoder: PacketEncoder::new(&rsa_crypto_fetcher),
+            decoder: PacketDecoder::new(&rsa_crypto_fetcher),
+        }
     }
 }
