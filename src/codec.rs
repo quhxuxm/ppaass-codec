@@ -3,11 +3,11 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use ppaass_crypto::crypto::{decrypt_with_aes, encrypt_with_aes, RsaCryptoFetcher};
 use ppaass_crypto::error::CryptoError;
-use ppaass_protocol::message::{Encryption, Packet};
+use ppaass_protocol::message::{PpaassPacket, PpaassPacketPayloadEncryption};
 use std::io::{Read, Write};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 use tracing::error;
-struct PacketEncoder<'a, T>
+struct PpaassPacketEncoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
@@ -15,7 +15,7 @@ where
     length_delimited_codec: LengthDelimitedCodec,
 }
 
-impl<'a, T> PacketEncoder<'a, T>
+impl<'a, T> PpaassPacketEncoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
@@ -28,13 +28,17 @@ where
 }
 
 /// Encode the ppaass message to bytes buffer
-impl<'a, T> Encoder<Packet> for PacketEncoder<'a, T>
+impl<'a, T> Encoder<PpaassPacket> for PpaassPacketEncoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
     type Error = CodecError;
 
-    fn encode(&mut self, original_packet: Packet, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(
+        &mut self,
+        original_packet: PpaassPacket,
+        dst: &mut BytesMut,
+    ) -> Result<(), Self::Error> {
         let rsa_crypto = self
             .rsa_crypto_fetcher
             .fetch(original_packet.user_token())?
@@ -44,8 +48,11 @@ where
             )))?;
 
         let (encrypted_payload_bytes, encrypted_encryption) = match original_packet.encryption() {
-            Encryption::Plain => (original_packet.payload().to_vec(), Encryption::Plain),
-            Encryption::Aes(ref original_aes_token) => {
+            PpaassPacketPayloadEncryption::Plain => (
+                original_packet.payload().to_vec(),
+                PpaassPacketPayloadEncryption::Plain,
+            ),
+            PpaassPacketPayloadEncryption::Aes(ref original_aes_token) => {
                 let rsa_encrypted_aes_token = Bytes::from(rsa_crypto.encrypt(original_aes_token)?);
                 let mut original_payload_bytes: BytesMut =
                     BytesMut::from(original_packet.payload());
@@ -53,12 +60,12 @@ where
                     encrypt_with_aes(original_aes_token, &mut original_payload_bytes)?;
                 (
                     aes_encrypted_payload_bytes.to_vec(),
-                    Encryption::Aes(rsa_encrypted_aes_token),
+                    PpaassPacketPayloadEncryption::Aes(rsa_encrypted_aes_token),
                 )
             }
         };
 
-        let packet_to_send = Packet::new(
+        let packet_to_send = PpaassPacket::new(
             original_packet.packet_id().to_owned(),
             original_packet.user_token().to_owned(),
             encrypted_encryption,
@@ -75,7 +82,7 @@ where
     }
 }
 
-struct PacketDecoder<'a, T>
+struct PpaassPacketDecoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
@@ -83,7 +90,7 @@ where
     length_delimited_codec: LengthDelimitedCodec,
 }
 
-impl<'a, T> PacketDecoder<'a, T>
+impl<'a, T> PpaassPacketDecoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
@@ -96,16 +103,16 @@ where
 }
 
 /// Decode the input bytes buffer to ppaass message
-impl<'a, T> Decoder for PacketDecoder<'a, T>
+impl<'a, T> Decoder for PpaassPacketDecoder<'a, T>
 where
     T: RsaCryptoFetcher,
 {
-    type Item = Packet;
+    type Item = PpaassPacket;
     type Error = CodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let length_decode_result = self.length_delimited_codec.decode(src)?;
-        let decompressed_packet: Packet = match length_decode_result {
+        let decompressed_packet: PpaassPacket = match length_decode_result {
             None => return Ok(None),
             Some(packet_bytes) => {
                 let mut gzip_decoder = GzDecoder::new(packet_bytes.reader());
@@ -119,8 +126,8 @@ where
             }
         };
         let decrypted_packed = match decompressed_packet.encryption() {
-            Encryption::Plain => decompressed_packet,
-            Encryption::Aes(rsa_encrypted_aes_token) => {
+            PpaassPacketPayloadEncryption::Plain => decompressed_packet,
+            PpaassPacketPayloadEncryption::Aes(rsa_encrypted_aes_token) => {
                 let rsa_crypto = self
                     .rsa_crypto_fetcher
                     .fetch(decompressed_packet.user_token())?
@@ -133,10 +140,10 @@ where
                     BytesMut::from_iter(decompressed_packet.payload());
                 let decrypted_payload =
                     decrypt_with_aes(&decrypted_aes_token, &mut decrypted_payload_bytes)?.freeze();
-                Packet::new(
+                PpaassPacket::new(
                     decompressed_packet.packet_id().to_owned(),
                     decompressed_packet.user_token().to_owned(),
-                    Encryption::Aes(decrypted_aes_token),
+                    PpaassPacketPayloadEncryption::Aes(decrypted_aes_token),
                     decrypted_payload,
                 )
             }
@@ -145,22 +152,43 @@ where
     }
 }
 
-pub struct PacketCodec<'a, T>
+pub struct PpaassPacketCodec<'a, T>
 where
     T: RsaCryptoFetcher,
 {
-    encoder: PacketEncoder<'a, T>,
-    decoder: PacketDecoder<'a, T>,
+    encoder: PpaassPacketEncoder<'a, T>,
+    decoder: PpaassPacketDecoder<'a, T>,
 }
 
-impl<'a, T> PacketCodec<'a, T>
+impl<'a, T> PpaassPacketCodec<'a, T>
 where
     T: RsaCryptoFetcher,
 {
     pub fn new(rsa_crypto_fetcher: &'a T) -> Self {
         Self {
-            encoder: PacketEncoder::new(&rsa_crypto_fetcher),
-            decoder: PacketDecoder::new(&rsa_crypto_fetcher),
+            encoder: PpaassPacketEncoder::new(&rsa_crypto_fetcher),
+            decoder: PpaassPacketDecoder::new(&rsa_crypto_fetcher),
         }
+    }
+}
+
+impl<'a, T> Encoder<PpaassPacket> for PpaassPacketCodec<'a, T>
+where
+    T: RsaCryptoFetcher,
+{
+    type Error = CodecError;
+    fn encode(&mut self, item: PpaassPacket, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encoder.encode(item, dst)
+    }
+}
+
+impl<'a, T> Decoder for PpaassPacketCodec<'a, T>
+where
+    T: RsaCryptoFetcher,
+{
+    type Item = PpaassPacket;
+    type Error = CodecError;
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        self.decoder.decode(src)
     }
 }

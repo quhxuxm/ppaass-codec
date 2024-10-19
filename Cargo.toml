@@ -1,15 +1,15 @@
 [package]
 edition = "2021"
 name = "ppaass-codec"
-version = "0.1.8"
+version = "0.1.9"
 description = "The codec part for ppaass application"
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ppaass-protocol = "0.1.6"
-ppaass-crypto = "0"
+ppaass-protocol = "0.1.7"
+ppaass-crypto = "0.1.3"
 thiserror = "1"
 bytes = "1"
 tokio-util = { version = "0", features = ["codec"] }
